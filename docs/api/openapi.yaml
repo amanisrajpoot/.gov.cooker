@@ -1,0 +1,1258 @@
+openapi: 3.0.3
+info:
+  title: .gov.cooker API
+  description: |
+    Transparency and accountability platform for government oversight.
+    
+    ## Authentication
+    Most endpoints require authentication via Bearer token in the Authorization header.
+    
+    ## Rate Limiting
+    - Anonymous users: 100 requests/hour
+    - Authenticated users: 1000 requests/hour
+    - Verified users: 5000 requests/hour
+    
+    ## Security
+    - All sensitive data is encrypted at rest
+    - Client-side encryption for whistleblower reports
+    - Metadata stripping on all uploads
+    - Rate limiting and abuse protection
+  version: 1.0.0
+  contact:
+    name: .gov.cooker Team
+    email: security@gov-cooker.org
+  license:
+    name: AGPL-3.0
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+
+servers:
+  - url: https://api.gov-cooker.org/v1
+    description: Production server
+  - url: https://staging-api.gov-cooker.org/v1
+    description: Staging server
+  - url: http://localhost:3001/api/v1
+    description: Development server
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+paths:
+  # Authentication endpoints
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register a new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handle, email, password, country, consent_flags]
+              properties:
+                handle:
+                  type: string
+                  minLength: 3
+                  maxLength: 50
+                  pattern: '^[a-zA-Z0-9_-]+$'
+                  example: "citizen123"
+                email:
+                  type: string
+                  format: email
+                  example: "user@example.com"
+                password:
+                  type: string
+                  minLength: 8
+                  example: "securePassword123"
+                country:
+                  type: string
+                  pattern: '^[A-Z]{2}$'
+                  example: "IN"
+                consent_flags:
+                  type: object
+                  properties:
+                    data_processing:
+                      type: boolean
+                    marketing:
+                      type: boolean
+                    analytics:
+                      type: boolean
+                  example:
+                    data_processing: true
+                    marketing: false
+                    analytics: true
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                  token:
+                    type: string
+                  message:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: User already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Login user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                  token:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [Authentication]
+      summary: Get current user
+      responses:
+        '200':
+          description: User information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/otp/send:
+    post:
+      tags: [Authentication]
+      summary: Send OTP for verification
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: OTP sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /auth/otp/verify:
+    post:
+      tags: [Authentication]
+      summary: Verify OTP
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [otp]
+              properties:
+                otp:
+                  type: string
+                  pattern: '^[0-9]{6}$'
+      responses:
+        '200':
+          description: OTP verified successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                  token:
+                    type: string
+
+  # Campaign endpoints
+  /campaigns:
+    get:
+      tags: [Campaigns]
+      summary: List campaigns
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Search term
+        - name: geo
+          in: query
+          schema:
+            type: string
+          description: Geographic filter (e.g., "IN-KA")
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, active, paused, completed, cancelled]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: List of campaigns
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  campaigns:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Campaign'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+    post:
+      tags: [Campaigns]
+      summary: Create a new campaign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, description, targets]
+              properties:
+                title:
+                  type: string
+                  maxLength: 200
+                description:
+                  type: string
+                targets:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      position:
+                        type: string
+                      department:
+                        type: string
+                expires_at:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: Campaign created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /campaigns/{id}:
+    get:
+      tags: [Campaigns]
+      summary: Get campaign details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Campaign details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /campaigns/{id}/sign:
+    post:
+      tags: [Campaigns]
+      summary: Sign a campaign
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sig_type]
+              properties:
+                sig_type:
+                  type: string
+                  enum: [verified, anonymous]
+                geo_bucket:
+                  type: string
+                  maxLength: 10
+      responses:
+        '201':
+          description: Signature recorded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signature_id:
+                    type: string
+                    format: uuid
+                  merkle_leaf:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: User has already signed this campaign
+
+  /campaigns/{id}/transparency:
+    get:
+      tags: [Campaigns]
+      summary: Get campaign transparency data
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Campaign transparency data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_signatures:
+                    type: integer
+                  verified_signatures:
+                    type: integer
+                  anonymous_signatures:
+                    type: integer
+                  merkle_root:
+                    type: string
+                  last_updated:
+                    type: string
+                    format: date-time
+
+  # Issue endpoints
+  /issues:
+    get:
+      tags: [Issues]
+      summary: List issues
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: department
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, assigned, in_progress, resolved, closed]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: List of issues
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  issues:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Issue'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+    post:
+      tags: [Issues]
+      summary: Create a new issue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, description, location, department]
+              properties:
+                title:
+                  type: string
+                  maxLength: 200
+                description:
+                  type: string
+                location:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                      enum: [Point]
+                    coordinates:
+                      type: array
+                      items:
+                        type: number
+                      minItems: 2
+                      maxItems: 2
+                department:
+                  type: string
+                  maxLength: 100
+                sla_date:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: Issue created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Issue'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /issues/{id}:
+    get:
+      tags: [Issues]
+      summary: Get issue details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Issue details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Issue'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /issues/{id}/reports:
+    post:
+      tags: [Issues]
+      summary: Submit a report for an issue
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                description:
+                  type: string
+                evidence:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                location:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                      enum: [Point]
+                    coordinates:
+                      type: array
+                      items:
+                        type: number
+      responses:
+        '201':
+          description: Report submitted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /issues/{id}/timeline:
+    get:
+      tags: [Issues]
+      summary: Get issue timeline
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Issue timeline
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  timeline:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TimelineEvent'
+
+  # RTI endpoints
+  /rti/draft:
+    post:
+      tags: [RTI]
+      summary: Generate RTI draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [department, subject, details]
+              properties:
+                department:
+                  type: string
+                subject:
+                  type: string
+                details:
+                  type: string
+                requester_name:
+                  type: string
+                requester_address:
+                  type: string
+      responses:
+        '200':
+          description: RTI draft generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  draft_text:
+                    type: string
+                  pdf_url:
+                    type: string
+                  instructions:
+                    type: string
+
+  /rti/cases:
+    get:
+      tags: [RTI]
+      summary: List RTI cases
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [submitted, acknowledged, replied, rejected, appealed]
+        - name: department
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: List of RTI cases
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cases:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RTICase'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+    post:
+      tags: [RTI]
+      summary: Create RTI case
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [department, draft_text]
+              properties:
+                department:
+                  type: string
+                draft_text:
+                  type: string
+                due_date:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: RTI case created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RTICase'
+
+  /rti/cases/{id}/reply:
+    post:
+      tags: [RTI]
+      summary: Upload RTI reply
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Reply processed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reply_id:
+                    type: string
+                    format: uuid
+                  ocr_text:
+                    type: string
+                  processed_at:
+                    type: string
+                    format: date-time
+
+  # Whistleblower endpoints
+  /whistle/cases:
+    post:
+      tags: [Whistleblower]
+      summary: Create whistleblower case
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, recipient_group_id, key_policy]
+              properties:
+                title:
+                  type: string
+                  maxLength: 200
+                recipient_group_id:
+                  type: string
+                  format: uuid
+                key_policy:
+                  type: object
+                  properties:
+                    recipients:
+                      type: array
+                      items:
+                        type: string
+                    time_lock:
+                      type: string
+                      format: date-time
+      responses:
+        '201':
+          description: Whistleblower case created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  case_id:
+                    type: string
+                    format: uuid
+                  upload_url:
+                    type: string
+
+  /whistle/cases/{id}/evidence:
+    post:
+      tags: [Whistleblower]
+      summary: Upload encrypted evidence
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '201':
+          description: Evidence uploaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  evidence_id:
+                    type: string
+                    format: uuid
+                  ciphertext_hash:
+                    type: string
+
+  # Open Data endpoints
+  /tenders:
+    get:
+      tags: [Open Data]
+      summary: List tenders
+      parameters:
+        - name: buyer
+          in: query
+          schema:
+            type: string
+        - name: vendor
+          in: query
+          schema:
+            type: string
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: anomaly_gt
+          in: query
+          schema:
+            type: number
+            minimum: 0
+            maximum: 1
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: List of tenders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tenders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tender'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /assets:
+    get:
+      tags: [Open Data]
+      summary: List asset declarations
+      parameters:
+        - name: official
+          in: query
+          schema:
+            type: string
+        - name: year
+          in: query
+          schema:
+            type: integer
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: List of asset declarations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AssetDeclaration'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  # Moderation endpoints
+  /mod/queue:
+    get:
+      tags: [Moderation]
+      summary: Get moderation queue
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [pending, in_review, approved, rejected]
+        - name: item_type
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Moderation queue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ModerationItem'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /mod/{id}/decide:
+    post:
+      tags: [Moderation]
+      summary: Make moderation decision
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason]
+              properties:
+                decision:
+                  type: string
+                  enum: [approved, rejected]
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Decision recorded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        handle:
+          type: string
+        role:
+          type: string
+          enum: [user, reporter, moderator, ngo_partner, journalist, lawyer, admin]
+        kyc_status:
+          type: string
+          enum: [unverified, pending, verified, rejected]
+        created_at:
+          type: string
+          format: date-time
+
+    Campaign:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        targets:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              position:
+                type: string
+              department:
+                type: string
+        status:
+          type: string
+          enum: [draft, active, paused, completed, cancelled]
+        signature_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+
+    Issue:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        location:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [Point]
+            coordinates:
+              type: array
+              items:
+                type: number
+        department:
+          type: string
+        status:
+          type: string
+          enum: [open, assigned, in_progress, resolved, closed]
+        sla_date:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    RTICase:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        department:
+          type: string
+        draft_text:
+          type: string
+        status:
+          type: string
+          enum: [submitted, acknowledged, replied, rejected, appealed]
+        due_date:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    Tender:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        buyer:
+          type: string
+        vendor:
+          type: string
+        amount:
+          type: number
+          format: decimal
+        date:
+          type: string
+          format: date
+        anomaly_score:
+          type: number
+          minimum: 0
+          maximum: 1
+        created_at:
+          type: string
+          format: date-time
+
+    AssetDeclaration:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        official_name:
+          type: string
+        position:
+          type: string
+        year:
+          type: integer
+        assets:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              value:
+                type: number
+              description:
+                type: string
+
+    ModerationItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        item_ref:
+          type: string
+        item_type:
+          type: string
+        reason:
+          type: string
+        state:
+          type: string
+          enum: [pending, in_review, approved, rejected]
+        created_at:
+          type: string
+          format: date-time
+
+    TimelineEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        description:
+          type: string
+        actor:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        pages:
+          type: integer
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+tags:
+  - name: Authentication
+    description: User authentication and management
+  - name: Campaigns
+    description: Petition campaigns and signatures
+  - name: Issues
+    description: Issue tracking and reporting
+  - name: RTI
+    description: Right to Information requests
+  - name: Whistleblower
+    description: Secure whistleblower reporting
+  - name: Open Data
+    description: Public datasets and analytics
+  - name: Moderation
+    description: Content moderation and review
