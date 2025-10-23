@@ -1,0 +1,12 @@
+# Ignore root files that aren't needed for Vercel
+package.json
+package-lock.json
+README.md
+DEPLOYMENT.md
+PROJECT_SUMMARY.md
+docs/
+database/
+scripts/
+landing/
+env.example
+.gitignore
